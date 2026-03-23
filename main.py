@@ -237,40 +237,28 @@ def _select_news_loop(all_articles, selected_cats):
 
 
 def _generate_script(chosen_articles):
-    """선택된 뉴스로 대본 생성 프롬프트 출력 및 저장"""
+    """선택된 뉴스로 Claude API를 통해 대본 자동 생성"""
     print()
     print("=" * 50)
-    print("  [3단계] 대본 생성")
+    print("  [3단계] 대본 생성 (Claude API)")
     print("=" * 50)
     print()
 
     generator = ScriptGenerator()
+    scripts = generator.generate_all(chosen_articles)
 
-    for cat_key, articles in chosen_articles.items():
-        cat_name = CATEGORIES[cat_key]["name"]
-        news_text = generator.format_news_for_prompt(articles)
-        prompt = generator.build_prompt(articles, cat_key)
-
-        print(f"--- [{cat_name}] 대본 생성용 프롬프트 ---")
+    if scripts:
+        saved = generator.save(scripts)
         print()
-
-        # 프롬프트 파일 저장
-        filepath = generator.save_prompt(prompt, cat_key)
-        print(f"프롬프트 저장 완료: {filepath}")
+        print("=" * 50)
+        print("  대본 생성 완료!")
+        print("=" * 50)
+        for path in saved:
+            print(f"  -> {path}")
         print()
-
-        # 선택된 뉴스 요약 출력
-        print(f"[선택된 뉴스 {len(articles)}건]")
-        for i, a in enumerate(articles, 1):
-            title = a.title if hasattr(a, "title") else a["title"]
-            print(f"  {i}. {title}")
-        print()
-
-    print("=" * 50)
-    print("  저장된 프롬프트를 Claude에게 붙여넣으면")
-    print("  명심Story v4.0 대본이 생성됩니다!")
-    print("=" * 50)
-    print()
+        print("명심Story 대본을 확인하세요!")
+    else:
+        print("생성된 대본이 없습니다!")
 
 
 def cmd_collect(args):

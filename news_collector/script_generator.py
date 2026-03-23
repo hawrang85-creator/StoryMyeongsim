@@ -1,12 +1,14 @@
-"""명심Story v4.0 대본 생성 모듈 (프롬프트 저장 방식)
+"""명심Story v4.0 대본 생성 모듈
 
-API 없이 동작합니다.
-선택된 뉴스를 기반으로 대본 생성용 프롬프트를 만들어
-파일로 저장합니다. 이 프롬프트를 Claude에 붙여넣으면 대본이 생성됩니다.
+Claude API로 선택된 뉴스 기반 대본을 자동 생성합니다.
 """
 
+import json
 import os
+import re
 from datetime import datetime
+
+import anthropic
 
 from news_collector.categories import CATEGORIES
 from news_collector.prompts import (
@@ -85,9 +87,11 @@ class ScriptValidator:
 
 
 class ScriptGenerator:
-    """명심Story v4.0 대본 생성기 (프롬프트 저장 방식)"""
+    """명심Story v4.0 대본 생성기 (Claude API)"""
 
-    def __init__(self):
+    def __init__(self, model="claude-sonnet-4-6"):
+        self.client = anthropic.Anthropic()
+        self.model = model
         self.validator = ScriptValidator()
 
     def format_news_for_prompt(self, articles):
@@ -105,13 +109,11 @@ class ScriptGenerator:
             lines.append("")
         return "\n".join(lines)
 
-    def build_prompt(self, articles, category_key):
-        """선택된 뉴스로 대본 생성용 전체 프롬프트 조합"""
+    def _build_system_prompt(self, category_key):
+        """시스템 프롬프트 + 카테고리 컨텍스트 조합"""
         category = CATEGORIES.get(category_key, {})
         category_name = category.get("name", category_key)
-        news_content = self.format_news_for_prompt(articles)
 
-        # 시스템 프롬프트 + 카테고리 컨텍스트
         system = SYSTEM_PROMPT
         context = CATEGORY_CONTEXT.get(category_key, {})
         if context:
@@ -121,39 +123,84 @@ class ScriptGenerator:
             system += f"\n- 클로징 키워드: {context.get('closing_keyword', '')}"
             system += f"\n- 참고 패턴: {context.get('reference_pattern', '')}"
 
-        # 사용자 프롬프트
+        return system
+
+    def generate(self, articles, category_key):
+        """뉴스 기사를 바탕으로 명심Story 대본 생성"""
+        category = CATEGORIES.get(category_key, {})
+        category_name = category.get("name", category_key)
+
+        news_content = self.format_news_for_prompt(articles)
+        system = self._build_system_prompt(category_key)
+
         user_prompt = SCRIPT_PROMPT_TEMPLATE.format(
             category=category_name,
             news_content=news_content,
         )
 
-        # 전체 프롬프트 조합
-        full_prompt = f"""[시스템 지침]
-{system}
+        print(f"  Claude API로 [{category_name}] 명심Story 대본 생성 중...")
 
----
+        message = self.client.messages.create(
+            model=self.model,
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
 
-[대본 생성 요청]
-{user_prompt}"""
+        full_response = message.content[0].text
+        print(f"  -> 대본 생성 완료 ({len(full_response)}자)")
 
-        return full_prompt
+        # 대본 부분만 추출하여 무결성 검증
+        script_section = self._extract_script_section(full_response)
+        if script_section:
+            validation = self.validator.validate(script_section)
+            print(f"  -> 무결성 검증:\n{validation}")
 
-    def save_prompt(self, prompt, category_key):
-        """프롬프트를 파일로 저장"""
+        return full_response
+
+    def _extract_script_section(self, full_response):
+        """전체 응답에서 [대본] 섹션만 추출"""
+        match = re.search(
+            r"\[대본\]\s*\n(.*?)(?:\n\[|\Z)",
+            full_response,
+            re.DOTALL,
+        )
+        if match:
+            return match.group(1).strip()
+        return None
+
+    def generate_all(self, articles_by_category):
+        """모든 카테고리의 대본을 생성"""
+        scripts = {}
+        for cat_key, articles in articles_by_category.items():
+            if not articles:
+                cat_name = CATEGORIES.get(cat_key, {}).get("name", cat_key)
+                print(f"  [{cat_name}] 뉴스가 없어 건너뜁니다!")
+                continue
+            scripts[cat_key] = self.generate(articles, cat_key)
+        return scripts
+
+    def save(self, scripts):
+        """생성된 대본을 파일로 저장"""
         os.makedirs(SCRIPTS_DIR, exist_ok=True)
 
-        category_name = CATEGORIES.get(category_key, {}).get("name", category_key)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"prompt_{category_key}_{timestamp}.txt"
-        filepath = os.path.join(SCRIPTS_DIR, filename)
+        saved_files = []
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(f"{'=' * 50}\n")
-            f.write(f"  명심Story 대본 생성 프롬프트\n")
-            f.write(f"  카테고리: {category_name}\n")
-            f.write(f"  생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
-            f.write(f"{'=' * 50}\n\n")
-            f.write("이 내용을 Claude에 붙여넣으세요:\n\n")
-            f.write(prompt)
+        for cat_key, script_text in scripts.items():
+            cat_name = CATEGORIES.get(cat_key, {}).get("name", cat_key)
+            fname = f"script_{cat_key}_{timestamp}.txt"
+            filepath = os.path.join(SCRIPTS_DIR, fname)
 
-        return filepath
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(f"{'=' * 50}\n")
+                f.write(f"  명심Story 대본\n")
+                f.write(f"  카테고리: {cat_name}\n")
+                f.write(f"  생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+                f.write(f"{'=' * 50}\n\n")
+                f.write(script_text)
+
+            saved_files.append(filepath)
+            print(f"  대본 저장: {filepath}")
+
+        return saved_files
