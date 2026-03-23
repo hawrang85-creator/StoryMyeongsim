@@ -1,11 +1,12 @@
-"""Claude API를 활용한 명심Story 대본 생성 모듈"""
+"""명심Story v4.0 대본 생성 모듈 (프롬프트 저장 방식)
 
-import json
+API 없이 동작합니다.
+선택된 뉴스를 기반으로 대본 생성용 프롬프트를 만들어
+파일로 저장합니다. 이 프롬프트를 Claude에 붙여넣으면 대본이 생성됩니다.
+"""
+
 import os
-import re
 from datetime import datetime
-
-import anthropic
 
 from news_collector.categories import CATEGORIES
 from news_collector.prompts import (
@@ -16,35 +17,32 @@ from news_collector.prompts import (
 
 SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
 
-FORBIDDEN_ENDINGS = ["고요", "겁니다", "까요", "을까요", "네요", "는요"]
-FORBIDDEN_PUNCTUATION = [".", ",", "'"]
-VALID_LINEBREAK_ENDINGS = ["죠", "요", "다", "데요", "니다"]
-
 
 class ScriptValidator:
     """명심Story v4.0 무결성 검증"""
 
+    FORBIDDEN_ENDINGS = ["고요", "겁니다", "까요", "을까요", "네요", "는요"]
+    FORBIDDEN_PUNCTUATION = [".", ",", "'"]
+    VALID_LINEBREAK_ENDINGS = ["죠", "요", "다", "데요", "니다"]
+
     @staticmethod
     def check_forbidden_endings(script_text):
-        """금지 어미 스캔"""
         found = []
-        for ending in FORBIDDEN_ENDINGS:
+        for ending in ScriptValidator.FORBIDDEN_ENDINGS:
             if ending in script_text:
                 found.append(ending)
         return found
 
     @staticmethod
     def check_punctuation(script_text):
-        """구두점 검증 (느낌표만 허용)"""
         found = []
-        for p in FORBIDDEN_PUNCTUATION:
+        for p in ScriptValidator.FORBIDDEN_PUNCTUATION:
             if p in script_text:
                 found.append(p)
         return found
 
     @staticmethod
     def check_linebreaks(script_text):
-        """줄바꿈 원칙 검증"""
         lines = script_text.strip().split("\n")
         violations = []
         for i, line in enumerate(lines[:-1]):
@@ -52,7 +50,7 @@ class ScriptValidator:
             if not line:
                 continue
             valid = False
-            for ending in VALID_LINEBREAK_ENDINGS:
+            for ending in ScriptValidator.VALID_LINEBREAK_ENDINGS:
                 if line.endswith(ending) or line.endswith(ending + "!"):
                     valid = True
                     break
@@ -62,7 +60,6 @@ class ScriptValidator:
 
     @staticmethod
     def validate(script_text):
-        """전체 무결성 검증"""
         results = []
 
         forbidden = ScriptValidator.check_forbidden_endings(script_text)
@@ -88,19 +85,17 @@ class ScriptValidator:
 
 
 class ScriptGenerator:
-    """명심Story v4.0 대본 생성기"""
+    """명심Story v4.0 대본 생성기 (프롬프트 저장 방식)"""
 
-    def __init__(self, model="claude-sonnet-4-6"):
-        self.client = anthropic.Anthropic()
-        self.model = model
+    def __init__(self):
         self.validator = ScriptValidator()
 
-    def _format_news_for_prompt(self, articles):
+    def format_news_for_prompt(self, articles):
         """뉴스 기사 목록을 프롬프트용 텍스트로 변환"""
         lines = []
         for i, article in enumerate(articles, 1):
             a = article if isinstance(article, dict) else article.to_dict()
-            lines.append(f"{i}! 제목: {a['title']}")
+            lines.append(f"{i}. 제목: {a['title']}")
             if a.get("summary"):
                 lines.append(f"   요약: {a['summary']}")
             if a.get("source"):
@@ -110,15 +105,15 @@ class ScriptGenerator:
             lines.append("")
         return "\n".join(lines)
 
-    def generate(self, articles, category_key):
-        """뉴스 기사를 바탕으로 명심Story 대본 생성"""
+    def build_prompt(self, articles, category_key):
+        """선택된 뉴스로 대본 생성용 전체 프롬프트 조합"""
         category = CATEGORIES.get(category_key, {})
         category_name = category.get("name", category_key)
+        news_content = self.format_news_for_prompt(articles)
 
-        news_content = self._format_news_for_prompt(articles)
-
-        context = CATEGORY_CONTEXT.get(category_key, {})
+        # 시스템 프롬프트 + 카테고리 컨텍스트
         system = SYSTEM_PROMPT
+        context = CATEGORY_CONTEXT.get(category_key, {})
         if context:
             system += f"\n\n## 이번 카테고리: [{category_name}]"
             system += f"\n- 톤: {context.get('tone', '')}"
@@ -126,94 +121,39 @@ class ScriptGenerator:
             system += f"\n- 클로징 키워드: {context.get('closing_keyword', '')}"
             system += f"\n- 참고 패턴: {context.get('reference_pattern', '')}"
 
+        # 사용자 프롬프트
         user_prompt = SCRIPT_PROMPT_TEMPLATE.format(
             category=category_name,
             news_content=news_content,
         )
 
-        print(f"  Claude API로 [{category_name}] 명심Story 대본 생성 중...")
+        # 전체 프롬프트 조합
+        full_prompt = f"""[시스템 지침]
+{system}
 
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            system=system,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
+---
 
-        full_response = message.content[0].text
-        print(f"  -> 대본 생성 완료 ({len(full_response)}자)")
+[대본 생성 요청]
+{user_prompt}"""
 
-        # 대본 부분만 추출하여 무결성 검증
-        script_section = self._extract_script_section(full_response)
-        if script_section:
-            validation = self.validator.validate(script_section)
-            print(f"  -> 무결성 검증:\n{validation}")
+        return full_prompt
 
-        return full_response
-
-    def _extract_script_section(self, full_response):
-        """전체 응답에서 [대본] 섹션만 추출"""
-        match = re.search(
-            r"\[대본\]\s*\n(.*?)(?:\n\[|\Z)",
-            full_response,
-            re.DOTALL,
-        )
-        if match:
-            return match.group(1).strip()
-        return None
-
-    def generate_all(self, articles_by_category):
-        """모든 카테고리의 대본을 생성"""
-        scripts = {}
-        for cat_key, articles in articles_by_category.items():
-            if not articles:
-                cat_name = CATEGORIES.get(cat_key, {}).get("name", cat_key)
-                print(f"  [{cat_name}] 뉴스가 없어 건너뜁니다!")
-                continue
-            scripts[cat_key] = self.generate(articles, cat_key)
-        return scripts
-
-    def save(self, scripts, filename=None):
-        """생성된 대본을 파일로 저장"""
+    def save_prompt(self, prompt, category_key):
+        """프롬프트를 파일로 저장"""
         os.makedirs(SCRIPTS_DIR, exist_ok=True)
 
+        category_name = CATEGORIES.get(category_key, {}).get("name", category_key)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        saved_files = []
+        filename = f"prompt_{category_key}_{timestamp}.txt"
+        filepath = os.path.join(SCRIPTS_DIR, filename)
 
-        for cat_key, script_text in scripts.items():
-            cat_name = CATEGORIES.get(cat_key, {}).get("name", cat_key)
-            fname = filename or f"script_{cat_key}_{timestamp}.txt"
-            filepath = os.path.join(SCRIPTS_DIR, fname)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(f"{'=' * 50}\n")
+            f.write(f"  명심Story 대본 생성 프롬프트\n")
+            f.write(f"  카테고리: {category_name}\n")
+            f.write(f"  생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+            f.write(f"{'=' * 50}\n\n")
+            f.write("이 내용을 Claude에 붙여넣으세요:\n\n")
+            f.write(prompt)
 
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(f"{'=' * 50}\n")
-                f.write(f"  명심Story 대본\n")
-                f.write(f"  카테고리: {cat_name}\n")
-                f.write(f"  생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
-                f.write(f"{'=' * 50}\n\n")
-                f.write(script_text)
-
-            saved_files.append(filepath)
-            print(f"  대본 저장: {filepath}")
-
-            # 여러 카테고리일 때 파일명 중복 방지
-            filename = None
-
-        return saved_files
-
-    def generate_from_json(self, json_path):
-        """저장된 뉴스 JSON 파일에서 대본 생성"""
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        articles_by_category = {}
-        for cat_name, articles in data.get("categories", {}).items():
-            cat_key = None
-            for key, cat in CATEGORIES.items():
-                if cat["name"] == cat_name:
-                    cat_key = key
-                    break
-            if cat_key:
-                articles_by_category[cat_key] = articles
-
-        return self.generate_all(articles_by_category)
+        return filepath
