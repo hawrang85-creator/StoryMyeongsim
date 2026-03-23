@@ -16,6 +16,7 @@ from news_collector.prompts import (
     SCRIPT_PROMPT_TEMPLATE,
     SYSTEM_PROMPT,
 )
+from news_collector.reference_scripts import REFERENCE_SCRIPTS
 
 SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
 
@@ -136,6 +137,7 @@ class ScriptGenerator:
         user_prompt = SCRIPT_PROMPT_TEMPLATE.format(
             category=category_name,
             news_content=news_content,
+            reference_examples=REFERENCE_SCRIPTS,
         )
 
         print(f"  Claude API로 [{category_name}] 명심Story 대본 생성 중...")
