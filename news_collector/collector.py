@@ -4,7 +4,6 @@ import json
 import os
 from datetime import datetime
 
-import feedparser
 import requests
 from bs4 import BeautifulSoup
 
@@ -45,7 +44,7 @@ class NewsCollector:
         }
 
     def collect_from_rss(self, category_key):
-        """RSS 피드에서 뉴스 수집"""
+        """RSS 피드에서 뉴스 수집 (BeautifulSoup XML 파싱)"""
         category = CATEGORIES.get(category_key)
         if not category:
             print(f"알 수 없는 카테고리: {category_key}")
@@ -54,14 +53,28 @@ class NewsCollector:
         articles = []
         for feed_url in category["rss_feeds"]:
             try:
-                feed = feedparser.parse(feed_url)
-                for entry in feed.entries[:10]:
+                resp = requests.get(feed_url, headers=self.headers, timeout=10)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.content, "xml")
+
+                feed_title = ""
+                channel = soup.find("channel")
+                if channel and channel.find("title"):
+                    feed_title = channel.find("title").get_text(strip=True)
+
+                items = soup.find_all("item")[:10]
+                for item in items:
+                    title = item.find("title")
+                    link = item.find("link")
+                    desc = item.find("description")
+                    pub_date = item.find("pubDate")
+
                     article = NewsArticle(
-                        title=entry.get("title", ""),
-                        link=entry.get("link", ""),
-                        summary=entry.get("summary", ""),
-                        published=entry.get("published", ""),
-                        source=feed.feed.get("title", feed_url),
+                        title=title.get_text(strip=True) if title else "",
+                        link=link.get_text(strip=True) if link else "",
+                        summary=desc.get_text(strip=True) if desc else "",
+                        published=pub_date.get_text(strip=True) if pub_date else "",
+                        source=feed_title or feed_url,
                         category=category["name"],
                     )
                     articles.append(article)
