@@ -89,8 +89,8 @@ class ScriptValidator:
 class ScriptGenerator:
     """명심Story v4.0 대본 생성기 (Claude API)"""
 
-    def __init__(self, model="claude-sonnet-4-6"):
-        self.client = anthropic.Anthropic()
+    def __init__(self, model="claude-opus-4-5-20250918"):
+        self.client = anthropic.Anthropic(api_key="여기에_API_KEY를_입력하세요")
         self.model = model
         self.validator = ScriptValidator()
 
