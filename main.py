@@ -59,7 +59,7 @@ def cmd_script(args):
 
     if args.from_file:
         print("=" * 50)
-        print("  명심 스토리 - 대본 생성기")
+        print("  명심Story v4.0 - 대본 생성기")
         print(f"  소스: {args.from_file}")
         print("=" * 50)
         print()
@@ -70,7 +70,7 @@ def cmd_script(args):
         collector = NewsCollector(categories=categories)
 
         print("=" * 50)
-        print("  명심 스토리 - 뉴스 수집 & 대본 생성")
+        print("  명심Story v4.0 - 뉴스 수집 & 대본 생성")
         print("=" * 50)
         print()
 
@@ -98,7 +98,7 @@ def cmd_script(args):
         for path in saved:
             print(f"  -> {path}")
         print()
-        print("대본을 확인하고 명심 스토리에 활용하세요!")
+        print("명심Story 대본을 확인하세요!")
     else:
         print("생성된 대본이 없습니다.")
 
