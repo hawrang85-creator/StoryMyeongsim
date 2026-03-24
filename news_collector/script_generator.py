@@ -1,6 +1,8 @@
 """명심Story v4.0 대본 생성 모듈
 
 Claude API로 선택된 뉴스 기반 대본을 자동 생성합니다.
+1차: 내레이션 대본 생성
+2차: 영상 지시어 대본 생성
 """
 
 import json
@@ -15,6 +17,8 @@ from news_collector.prompts import (
     CATEGORY_CONTEXT,
     SCRIPT_PROMPT_TEMPLATE,
     SYSTEM_PROMPT,
+    VIDEO_DIRECTION_PROMPT_TEMPLATE,
+    VIDEO_DIRECTION_SYSTEM_PROMPT,
 )
 from news_collector.reference_scripts import REFERENCE_SCRIPTS
 
@@ -88,7 +92,12 @@ class ScriptValidator:
 
 
 class ScriptGenerator:
-    """명심Story v4.0 대본 생성기 (Claude API)"""
+    """명심Story v4.0 대본 생성기 (Claude API)
+
+    2단계 생성:
+    1차 generate() → 내레이션 대본
+    2차 generate_video_directions() → 영상 지시어 대본
+    """
 
     def __init__(self, model="claude-opus-4-5-20250918"):
         self.client = anthropic.Anthropic(api_key="여기에_API_KEY를_입력하세요")
@@ -126,8 +135,10 @@ class ScriptGenerator:
 
         return system
 
+    # ── 1차: 내레이션 대본 생성 ──
+
     def generate(self, articles, category_key):
-        """뉴스 기사를 바탕으로 명심Story 대본 생성"""
+        """1차: 뉴스 기사를 바탕으로 내레이션 대본 생성"""
         category = CATEGORIES.get(category_key, {})
         category_name = category.get("name", category_key)
 
@@ -137,10 +148,9 @@ class ScriptGenerator:
         user_prompt = SCRIPT_PROMPT_TEMPLATE.format(
             category=category_name,
             news_content=news_content,
-            reference_examples=REFERENCE_SCRIPTS,
         )
 
-        print(f"  Claude API로 [{category_name}] 명심Story 대본 생성 중...")
+        print(f"  [1차] Claude API로 [{category_name}] 내레이션 대본 생성 중...")
 
         message = self.client.messages.create(
             model=self.model,
@@ -150,7 +160,7 @@ class ScriptGenerator:
         )
 
         full_response = message.content[0].text
-        print(f"  -> 대본 생성 완료 ({len(full_response)}자)")
+        print(f"  -> 내레이션 대본 생성 완료 ({len(full_response)}자)")
 
         # 대본 부분만 추출하여 무결성 검증
         script_section = self._extract_script_section(full_response)
@@ -159,6 +169,33 @@ class ScriptGenerator:
             print(f"  -> 무결성 검증:\n{validation}")
 
         return full_response
+
+    # ── 2차: 영상 지시어 대본 생성 ──
+
+    def generate_video_directions(self, narration_script):
+        """2차: 완성된 내레이션 대본에 영상 지시어를 추가"""
+        # 대본 섹션만 추출 (전체 응답에서)
+        script_section = self._extract_script_section(narration_script)
+        script_text = script_section if script_section else narration_script
+
+        user_prompt = VIDEO_DIRECTION_PROMPT_TEMPLATE.format(
+            script_text=script_text,
+            reference_examples=REFERENCE_SCRIPTS,
+        )
+
+        print(f"  [2차] Claude API로 영상 지시어 대본 생성 중...")
+
+        message = self.client.messages.create(
+            model=self.model,
+            max_tokens=4096,
+            system=VIDEO_DIRECTION_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+
+        video_script = message.content[0].text
+        print(f"  -> 영상 지시어 대본 생성 완료 ({len(video_script)}자)")
+
+        return video_script
 
     def _extract_script_section(self, full_response):
         """전체 응답에서 [대본] 섹션만 추출"""
@@ -172,7 +209,7 @@ class ScriptGenerator:
         return None
 
     def generate_all(self, articles_by_category):
-        """모든 카테고리의 대본을 생성"""
+        """모든 카테고리의 내레이션 대본을 생성 (1차)"""
         scripts = {}
         for cat_key, articles in articles_by_category.items():
             if not articles:
@@ -182,7 +219,16 @@ class ScriptGenerator:
             scripts[cat_key] = self.generate(articles, cat_key)
         return scripts
 
-    def save(self, scripts):
+    def generate_all_video_directions(self, narration_scripts):
+        """모든 카테고리의 영상 지시어 대본을 생성 (2차)"""
+        video_scripts = {}
+        for cat_key, narration in narration_scripts.items():
+            cat_name = CATEGORIES.get(cat_key, {}).get("name", cat_key)
+            print(f"\n  --- [{cat_name}] 영상 지시어 생성 ---")
+            video_scripts[cat_key] = self.generate_video_directions(narration)
+        return video_scripts
+
+    def save(self, scripts, suffix=""):
         """생성된 대본을 파일로 저장"""
         os.makedirs(SCRIPTS_DIR, exist_ok=True)
 
@@ -191,18 +237,20 @@ class ScriptGenerator:
 
         for cat_key, script_text in scripts.items():
             cat_name = CATEGORIES.get(cat_key, {}).get("name", cat_key)
-            fname = f"script_{cat_key}_{timestamp}.txt"
+            fname = f"script_{cat_key}{suffix}_{timestamp}.txt"
             filepath = os.path.join(SCRIPTS_DIR, fname)
+
+            label = "영상 지시어 대본" if suffix else "내레이션 대본"
 
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(f"{'=' * 50}\n")
-                f.write(f"  명심Story 대본\n")
+                f.write(f"  명심Story {label}\n")
                 f.write(f"  카테고리: {cat_name}\n")
                 f.write(f"  생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
                 f.write(f"{'=' * 50}\n\n")
                 f.write(script_text)
 
             saved_files.append(filepath)
-            print(f"  대본 저장: {filepath}")
+            print(f"  {label} 저장: {filepath}")
 
         return saved_files

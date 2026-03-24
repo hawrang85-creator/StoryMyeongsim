@@ -91,8 +91,14 @@ def interactive_mode():
         print("선택된 뉴스가 없습니다! 종료합니다!")
         return
 
-    # ── 4단계: 대본 생성 ──
-    _generate_script(chosen)
+    # ── 4단계: 내레이션 대본 생성 ──
+    scripts = _generate_narration(chosen)
+
+    if not scripts:
+        return
+
+    # ── 5단계: 영상 지시어 대본 생성 ──
+    _generate_video_directions(scripts)
 
 
 def _collect_news(selected_cats, method="rss", extra_keywords=None):
@@ -236,11 +242,11 @@ def _select_news_loop(all_articles, selected_cats):
             continue
 
 
-def _generate_script(chosen_articles):
-    """선택된 뉴스로 Claude API를 통해 대본 자동 생성"""
+def _generate_narration(chosen_articles):
+    """1차: 선택된 뉴스로 Claude API를 통해 내레이션 대본 생성"""
     print()
     print("=" * 50)
-    print("  [3단계] 대본 생성 (Claude API)")
+    print("  [3단계] 내레이션 대본 생성 (Claude API)")
     print("=" * 50)
     print()
 
@@ -251,14 +257,58 @@ def _generate_script(chosen_articles):
         saved = generator.save(scripts)
         print()
         print("=" * 50)
-        print("  대본 생성 완료!")
+        print("  내레이션 대본 생성 완료!")
         print("=" * 50)
         for path in saved:
             print(f"  -> {path}")
         print()
-        print("명심Story 대본을 확인하세요!")
+
+        # 대본 미리보기 (대본 섹션만)
+        for cat_key, script in scripts.items():
+            section = generator._extract_script_section(script)
+            if section:
+                cat_name = CATEGORIES[cat_key]["name"]
+                print(f"--- [{cat_name}] 대본 미리보기 ---")
+                print(section[:500])
+                if len(section) > 500:
+                    print("...(이하 생략)")
+                print()
+
+        return scripts
     else:
         print("생성된 대본이 없습니다!")
+        return None
+
+
+def _generate_video_directions(narration_scripts):
+    """2차: 내레이션 대본을 바탕으로 영상 지시어 대본 생성"""
+    print()
+    confirm = _input_prompt("영상 지시어 대본을 생성할까요? (y/n): ")
+    if confirm.lower() not in ("y", "yes", "ㅛ", ""):
+        print("영상 지시어 생성을 건너뜁니다!")
+        return
+
+    print()
+    print("=" * 50)
+    print("  [4단계] 영상 지시어 대본 생성 (Claude API)")
+    print("=" * 50)
+    print()
+
+    generator = ScriptGenerator()
+    video_scripts = generator.generate_all_video_directions(narration_scripts)
+
+    if video_scripts:
+        saved = generator.save(video_scripts, suffix="_영상지시어")
+        print()
+        print("=" * 50)
+        print("  영상 지시어 대본 생성 완료!")
+        print("=" * 50)
+        for path in saved:
+            print(f"  -> {path}")
+        print()
+        print("명심Story 영상 지시어 대본을 확인하세요!")
+    else:
+        print("생성된 영상 지시어 대본이 없습니다!")
 
 
 def cmd_collect(args):
