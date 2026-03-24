@@ -99,8 +99,8 @@ class ScriptGenerator:
     2차 generate_video_directions() → 영상 지시어 대본
     """
 
-    def __init__(self, model="claude-opus-4-20250514"):
-        self.client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    def __init__(self, api_key=None, model="claude-opus-4-20250514"):
+        self.client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
         self.model = model
         self.validator = ScriptValidator()
 
