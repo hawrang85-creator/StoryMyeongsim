@@ -99,7 +99,7 @@ class ScriptGenerator:
     2차 generate_video_directions() → 영상 지시어 대본
     """
 
-    def __init__(self, model="claude-opus-4-5-20250918"):
+    def __init__(self, model="claude-sonnet-4-5-20241022"):
         self.client = anthropic.Anthropic(api_key="여기에_API_KEY를_입력하세요")
         self.model = model
         self.validator = ScriptValidator()
